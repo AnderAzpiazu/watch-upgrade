@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101214">
+  <title>Watch Upgrade · Resumen de salud</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="importer.js"></script>
+  <script defer src="file-sync.js"></script>
+  <script defer src="dashboard.js"></script>
+</head>
+<body>
+  <aside class="rail">
+    <a class="brand" href="#resumen" aria-label="Watch Upgrade, resumen"><span class="brandmark" data-icon="brand"></span><strong>Watch<span>Upgrade</span></strong></a>
+    <nav aria-label="Navegación principal">
+      <a class="navitem active" href="#resumen"><i data-icon="grid"></i><span>Vista general</span></a>
+      <a class="navitem" href="#tendencias"><i data-icon="trend"></i><span>Tendencias</span></a>
+      <a class="navitem" href="#historial"><i data-icon="history"></i><span>Historial</span></a>
+      <a class="navitem" href="#dispositivo"><i data-icon="watch"></i><span>Dispositivo</span></a>
+    </nav>
+    <div class="railbottom"><button class="navitem" data-open-data><i data-icon="database"></i><span>Gestionar datos</span></button>
+      <div class="localstate"><i data-icon="shield"></i><div><strong>Almacenamiento local</strong><small>En este navegador</small></div></div>
+    </div>
+  </aside>
+  <main>
+    <header class="topbar"><span class="crumb"><i data-icon="grid"></i> Panel de salud <b>/</b> <strong>Vista general</strong></span><button class="mode" id="mode" data-open-data><span></span><b>Datos de ejemplo</b></button></header>
+    <div class="content" id="resumen">
+      <section class="titlebar"><div><h1>Resumen de salud</h1><p id="view-date"></p></div>
+        <div class="actions"><div class="date-wrap"><i data-icon="calendar"></i><label for="date-picker" id="date-label">Fecha</label><i data-icon="down"></i><input id="date-picker" type="date" aria-label="Elegir fecha del resumen"></div>
+          <button class="primary" data-open-data><i data-icon="import"></i>Importar datos</button></div>
+      </section>
+      <section class="metrics" aria-label="Mediciones diarias">
+        <article class="metric" data-k="steps"><div class="metric-label"><i data-icon="foot"></i><h2>Pasos</h2></div><p class="big"><strong></strong><span>pasos</span></p><div class="metric-foot"><small></small><canvas aria-hidden="true"></canvas></div></article>
+        <article class="metric" data-k="averageHeartRate"><div class="metric-label"><i data-icon="heart"></i><h2>Pulso medio</h2></div><p class="big"><strong></strong><span>lpm</span></p><div class="metric-foot"><small></small><canvas aria-hidden="true"></canvas></div></article>
+        <article class="metric" data-k="sleep"><div class="metric-label"><i data-icon="moon"></i><h2>Sueño</h2></div><p class="big"><strong></strong><span></span></p><div class="metric-foot"><small></small><canvas aria-hidden="true"></canvas></div></article>
+        <article class="metric" data-k="energy"><div class="metric-label"><i data-icon="flame"></i><h2>Energía activa</h2></div><p class="big"><strong></strong><span>kcal</span></p><div class="metric-foot"><small></small><canvas aria-hidden="true"></canvas></div></article>
+      </section>
+      <div class="midgrid">
+        <section class="panel chartpanel" id="tendencias"><div class="panel-head"><div><div class="kicker"><span class="dash"></span>TENDENCIAS</div><h2>Frecuencia cardíaca</h2></div><div class="segmented" aria-label="Periodo del gráfico"><button data-range="day" aria-pressed="true">Día</button><button data-range="week" aria-pressed="false">Semana</button></div></div>
+          <div class="chart-summary"><strong id="chart-value">—</strong><span>lpm</span><small id="chart-context">Media diaria</small></div>
+          <div class="chartbox"><canvas id="chart" role="img" aria-label="Gráfico de frecuencia cardíaca"></canvas><div id="chart-tip" hidden></div><p id="chart-empty" hidden>Sin lecturas de pulso en este periodo.</p></div>
+          <div class="chart-footer"><span><b></b> Pulso medio</span><span id="chart-extents"></span></div>
+        </section>
+        <section class="panel device" id="dispositivo"><div class="device-top"><div class="kicker"><span class="dash"></span>DISPOSITIVO</div><i data-icon="watch"></i></div>
+          <div class="watch-image" role="img" aria-label="Ilustración de un reloj deportivo de esfera redonda"></div>
+          <div class="device-info"><h2>Huawei Watch GT</h2><span>Modelo FTN-B19</span></div>
+        </section>
+      </div>
+      <section class="panel tablepanel" id="historial"><div class="table-head"><div><div class="kicker"><span class="dash"></span>ACTIVIDAD</div><h2>Historial diario</h2></div><button id="history-toggle" class="secondary">Ver más días</button></div>
+        <div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Pasos</th><th>Distancia</th><th>Pulso medio</th><th>Sueño</th><th>Entrenos</th></tr></thead><tbody id="records"></tbody></table></div>
+      </section>
+    </div>
+  </main>
+  <dialog id="data-dialog" aria-labelledby="data-title"><div class="dialog-head"><i class="dialog-symbol" data-icon="database"></i><button id="close" class="iconbutton" aria-label="Cerrar"><i data-icon="close"></i></button></div>
+    <h2 id="data-title">Tus datos de salud</h2><p>Importa el XML de Salud de Apple para ver las mediciones que ha compartido Huawei Health. El archivo se procesa en este navegador.</p>
+    <button id="pick-file" class="primary wide"><i data-icon="import"></i>Elegir archivo XML</button><input id="file" type="file" accept=".xml,text/xml,application/xml" hidden>
+    <details><summary>Cómo obtener el archivo</summary><ol><li>Sincroniza el reloj en Huawei Health y permite que escriba datos en Salud.</li><li>En tu iPhone, abre Salud, toca tu foto de perfil y elige «Exportar todos los datos de salud».</li><li>Descomprime el ZIP y selecciona el XML que contiene los registros de salud.</li></ol></details>
+    <div id="sync-section"><h3>Actualizar desde un archivo</h3><p id="sync-text">Vincula el XML para detectar cambios mientras el panel está abierto.</p><div class="sync-buttons"><button id="sync-choose" class="secondary">Vincular XML</button><button id="sync-reconnect" class="secondary" hidden>Dar acceso</button><button id="sync-stop" class="textbutton" hidden>Desvincular</button></div></div>
+    <p class="status" id="import-status" role="status" aria-live="polite"></p>
+    <div id="data-controls" hidden><p id="source-info"></p><button id="clear-data" class="textbutton">Borrar datos importados</button></div>
+  </dialog>
+  <noscript>Activa JavaScript para ver el panel e importar datos.</noscript>
+</body>
+</html>
