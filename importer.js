@@ -6,6 +6,8 @@
   const DAY = 24 * 60 * MINUTE;
   const CHUNK_BYTES = 256 * 1024;
   const MAX_TAG_LENGTH = 4 * 1024 * 1024;
+  const kmUnits = { km: 1, m: 0.001, mi: 1.609344, yd: 0.0009144 };
+  const pulseUnits = { "count/min": 1, bpm: 1, "count/s": 60 };
   const invalidXML = () => new Error("El XML está incompleto o no es una exportación válida de Salud.");
 
   function unescapeAttribute(text) {
@@ -54,17 +56,17 @@
   }
 
   // Keep disjoint intervals per night. Summaries and overlapping stages count once.
-  function addInterval(intervals, start, end) {
+  function addInterval(intervals, start, end, startOffset, endOffset) {
     let index = intervals.length;
     while (index > 0 && intervals[index - 1][1] >= start) index--;
     let remove = 0;
     while (index + remove < intervals.length && intervals[index + remove][0] <= end) {
       const prior = intervals[index + remove];
-      start = Math.min(start, prior[0]);
-      end = Math.max(end, prior[1]);
+      if (prior[0] < start) { start = prior[0]; startOffset = prior[2]; }
+      if (prior[1] > end) { end = prior[1]; endOffset = prior[3]; }
       remove++;
     }
-    intervals.splice(index, remove, [start, end]);
+    intervals.splice(index, remove, [start, end, startOffset, endOffset]);
   }
 
   function addSleep(start, end, nights) {
@@ -72,14 +74,17 @@
     const startLocal = start.stamp + start.offset * MINUTE;
     let closingNoon = Math.floor((startLocal + DAY / 2) / DAY) * DAY + DAY / 2;
     let cursor = start.stamp;
+    let cursorOffset = start.offset;
     while (cursor < end.stamp) {
       const label = new Date(closingNoon).toISOString().slice(0, 10);
       const offset = label >= end.day ? end.offset : start.offset;
       const stop = Math.min(end.stamp, closingNoon - offset * MINUTE);
       if (stop > cursor) {
         if (!nights.has(label)) nights.set(label, []);
-        addInterval(nights.get(label), cursor, stop);
+        const stopOffset = stop === end.stamp ? end.offset : offset;
+        addInterval(nights.get(label), cursor, stop, cursorOffset, stopOffset);
         cursor = stop;
+        cursorOffset = stopOffset;
       }
       closingNoon += DAY;
     }
@@ -90,6 +95,8 @@
     const nights = new Map();
     const pulses = new Map();
     const sources = new Set();
+    const workouts = [];
+    let latestMeasurementAt = null;
     function day(key) { return days[key] ??= {}; }
 
     function add(name, attrs) {
@@ -99,18 +106,26 @@
       if (!start) return;
       const end = dateParts(attrs.endDate) ?? start;
       if (end.stamp < start.stamp) return;
+      let workout;
       if (name === "Workout") {
         let duration = converted(attrs.duration, attrs.durationUnit, { min: 1, s: 1 / 60, h: 60 });
         if (duration === null) duration = (end.stamp - start.stamp) / MINUTE;
         const daily = day(start.day);
         daily.workouts = (daily.workouts ?? 0) + 1;
         daily.workoutMinutes = (daily.workoutMinutes ?? 0) + duration;
+        workout = {
+          day: start.day, type: attrs.workoutActivityType || "HKWorkoutActivityTypeOther", source,
+          start: start.stamp, end: end.stamp, time: attrs.startDate.slice(11,16),
+          durationMinutes: duration, distanceKm: converted(attrs.totalDistance, attrs.totalDistanceUnit, kmUnits),
+          averageHeartRate: null, maxHeartRate: null, pulse: []
+        };
+        workouts.push(workout);
       } else if (attrs.type === "HKCategoryTypeIdentifierSleepAnalysis") {
         if (!/^HKCategoryValueSleepAnalysisAsleep(?:Unspecified|Core|Deep|REM)?$/.test(attrs.value) ||
             end.stamp === start.stamp) return;
         addSleep(start, end, nights);
       } else if (attrs.type === "HKQuantityTypeIdentifierHeartRate") {
-        const value = converted(attrs.value, attrs.unit, { "count/min": 1, bpm: 1, "count/s": 60 });
+        const value = converted(attrs.value, attrs.unit, pulseUnits);
         if (value === null || value === 0) return;
         const key = end.day;
         if (!pulses.has(key)) pulses.set(key, { count: 0, sum: 0, latest: -Infinity, bins: new Map() });
@@ -136,7 +151,7 @@
             break;
           case "HKQuantityTypeIdentifierDistanceWalkingRunning":
             metric = "distance";
-            value = converted(attrs.value, attrs.unit, { km: 1, m: 0.001, mi: 1.609344 });
+            value = converted(attrs.value, attrs.unit, kmUnits);
             break;
           case "HKQuantityTypeIdentifierActiveEnergyBurned":
             metric = "energy";
@@ -148,7 +163,9 @@
         const daily = day(start.day);
         daily[metric] = (daily[metric] ?? 0) + value;
       }
+      latestMeasurementAt = Math.max(latestMeasurementAt ?? -Infinity, end.stamp);
       sources.add(source);
+      return workout;
     }
 
     function finish() {
@@ -161,10 +178,29 @@
         }));
       }
       for (const [key, intervals] of nights) {
-        day(key).sleep = intervals.reduce((sum, [start, end]) => sum + (end - start) / MINUTE, 0);
+        // Group stages of the same episode, keeping naps out of its start/end times.
+        const episodes = [];
+        let total = 0;
+        for (const [start, end, startOffset, endOffset] of intervals) {
+          const minutes = (end - start) / MINUTE;
+          total += minutes;
+          const prior = episodes[episodes.length - 1];
+          if (prior && start - prior.end <= 60 * MINUTE) {
+            Object.assign(prior, {end, endOffset, minutes: prior.minutes + minutes});
+          } else {
+            episodes.push({start, end, startOffset, endOffset, minutes});
+          }
+        }
+        const main = episodes.reduce((best, item) => item.minutes > best.minutes ? item : best);
+        const openingNoon = Date.parse(key + "T00:00:00Z") - DAY / 2;
+        Object.assign(day(key), {
+          sleep: total,
+          sleepStart: (main.start - openingNoon) / MINUTE + main.startOffset,
+          sleepEnd: (main.end - openingNoon) / MINUTE + main.endOffset
+        });
       }
       if (!sources.size) throw new Error("No se encontraron mediciones de Huawei en este archivo de Salud. Comprueba las fuentes y los permisos de Huawei Health en el iPhone.");
-      return { days, sources: Array.from(sources).sort() };
+      return { days, workouts, latestMeasurementAt, sources: Array.from(sources).sort() };
     }
     return { add, finish };
   }
@@ -197,12 +233,8 @@
     return -1;
   }
 
-  async function read(file) {
-    if (!file || !file.size) throw new Error("Selecciona un archivo XML exportado desde Salud.");
-    const first = new Uint8Array(await file.slice(0, 2).arrayBuffer());
-    if (first[0] === 0x50 && first[1] === 0x4b) throw new Error("Descomprime el ZIP de Salud y selecciona el XML de datos que contiene.");
+  async function scan(file, visit) {
     const decoder = new TextDecoder("utf-8", { fatal: true });
-    const summary = createSummary();
     const stack = [];
     let rootSeen = false;
     let carry = "";
@@ -237,9 +269,7 @@
         if (!stack.length) {
           if (rootSeen || name !== "HealthData") throw invalidXML();
           rootSeen = true;
-        } else if (stack.length === 1 && (name === "Record" || name === "Workout")) {
-          summary.add(name, attributes(tag));
-        }
+        } else visit(stack, name, tag);
         if (!tag.endsWith("/>")) {
           if (stack.length >= 128) throw invalidXML();
           stack.push(name);
@@ -247,7 +277,109 @@
       }
     }
     if (!rootSeen || stack.length) throw invalidXML();
-    return summary.finish();
+  }
+
+  function addWorkoutStatistics(workout, attrs) {
+    if (attrs.type === "HKQuantityTypeIdentifierHeartRate") {
+      const mean = converted(attrs.average, attrs.unit, pulseUnits);
+      const max = converted(attrs.maximum, attrs.unit, pulseUnits);
+      if (mean > 0) workout.averageHeartRate = mean;
+      if (max > 0) workout.maxHeartRate = max;
+    } else if (workout.distanceKm === null && [
+      "HKQuantityTypeIdentifierDistanceWalkingRunning", "HKQuantityTypeIdentifierDistanceCycling",
+      "HKQuantityTypeIdentifierDistanceSwimming", "HKQuantityTypeIdentifierDistanceWheelchair",
+      "HKQuantityTypeIdentifierDistanceDownhillSnowSports", "HKQuantityTypeIdentifierDistanceRowing",
+      "HKQuantityTypeIdentifierDistancePaddleSports", "HKQuantityTypeIdentifierDistanceSkatingSports"
+    ].includes(attrs.type)) {
+      workout.distanceKm = converted(attrs.sum, attrs.unit, kmUnits);
+    }
+  }
+
+  // Only retain timed samples inside sessions. A second streaming pass also handles workouts
+  // listed after years of heart-rate records without storing those years of raw readings.
+  function distanceTypeFor(workout) {
+    const activity = workout.type.replace(/^HKWorkoutActivityType/, "");
+    const quantity = {
+      Walking: "WalkingRunning", Running: "WalkingRunning", Hiking: "WalkingRunning",
+      Cycling: "Cycling", Swimming: "Swimming", Rowing: "Rowing"
+    };
+    return Object.hasOwn(quantity, activity) ? "HKQuantityTypeIdentifierDistance" + quantity[activity] : null;
+  }
+
+  async function collectWorkoutSamples(file, workouts) {
+    workouts.sort((a, b) => a.start - b.start || a.end - b.end);
+    let longestEnd = -Infinity;
+    const windows = workouts.map(workout => {
+      longestEnd = Math.max(longestEnd, workout.end);
+      return { workout, longestEnd, distanceType: distanceTypeFor(workout), distanceSum: null,
+        bins: new Map(), count: 0, sum: 0, max: -Infinity };
+    });
+    await scan(file, (stack, name, tag) => {
+      if (stack.length !== 1 || name !== "Record" ||
+          !(tag.includes("HKQuantityTypeIdentifierHeartRate") || tag.includes("HKQuantityTypeIdentifierDistance"))) return;
+      const attrs = attributes(tag);
+      if (!/huawei/i.test(attrs.sourceName)) return;
+      const isPulse = attrs.type === "HKQuantityTypeIdentifierHeartRate";
+      const end = dateParts(attrs.endDate || attrs.startDate);
+      const start = isPulse ? end : dateParts(attrs.startDate);
+      const value = converted(attrs.value, attrs.unit, isPulse ? pulseUnits : kmUnits);
+      if (!end || !start || start.stamp > end.stamp || value === null || (isPulse && value === 0)) return;
+      let low = 0, high = windows.length;
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (windows[mid].workout.start <= end.stamp) low = mid + 1;
+        else high = mid;
+      }
+      for (let i = low - 1; i >= 0 && windows[i].longestEnd >= end.stamp; i--) {
+        const interval = windows[i];
+        const workout = interval.workout;
+        if (end.stamp > workout.end || start.stamp < workout.start || workout.source !== attrs.sourceName) continue;
+        if (!isPulse) {
+          if (attrs.type === interval.distanceType && workout.distanceKm === null) {
+            interval.distanceSum = (interval.distanceSum ?? 0) + value;
+          }
+          continue;
+        }
+        interval.count++;
+        interval.sum += value;
+        interval.max = Math.max(interval.max, value);
+        const minute = Math.floor((end.stamp - workout.start) / MINUTE);
+        const bin = interval.bins.get(minute) || { at: end.stamp, sum: 0, count: 0 };
+        bin.at = Math.min(bin.at, end.stamp);
+        bin.sum += value;
+        bin.count++;
+        interval.bins.set(minute, bin);
+      }
+    });
+    for (const {workout, distanceSum, bins, count, sum, max} of windows) {
+      workout.distanceKm ??= distanceSum;
+      workout.paceMinPerKm = workout.distanceKm > 0 && workout.durationMinutes > 0
+        ? workout.durationMinutes / workout.distanceKm : null;
+      if (!count) continue;
+      workout.pulse = [...bins.values()].sort((a, b) => a.at - b.at).map(bin => ({
+        at: bin.at, value: bin.sum / bin.count
+      }));
+      workout.averageHeartRate ??= sum / count;
+      workout.maxHeartRate ??= max;
+    }
+  }
+
+  async function read(file) {
+    if (!file || !file.size) throw new Error("Selecciona un archivo XML exportado desde Salud.");
+    const first = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+    if (first[0] === 0x50 && first[1] === 0x4b) throw new Error("Descomprime el ZIP de Salud y selecciona el XML de datos que contiene.");
+    const summary = createSummary();
+    let currentWorkout;
+    await scan(file, (stack, name, tag) => {
+      if (stack.length === 1 && (name === "Record" || name === "Workout")) {
+        currentWorkout = summary.add(name, attributes(tag));
+      } else if (currentWorkout && stack.length === 2 && stack[1] === "Workout" && name === "WorkoutStatistics") {
+        addWorkoutStatistics(currentWorkout, attributes(tag));
+      }
+    });
+    const result = summary.finish();
+    if (result.workouts.length) await collectWorkoutSamples(file, result.workouts);
+    return result;
   }
 
   window.WatchImport = Object.freeze({ read });

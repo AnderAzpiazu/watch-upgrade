@@ -142,7 +142,7 @@ window.WatchFileSync = (() => {
         setHandle(entry.handle, hasData ? entry.stamp : null);
         await check();
       } else {
-        status("idle", "Puedes vincular un XML para detectar sus cambios.");
+        status("idle", "Puedes vincular un ZIP o XML para detectar sus cambios.");
       }
     }
 
@@ -155,7 +155,7 @@ window.WatchFileSync = (() => {
       try {
         const [selected] = await window.showOpenFilePicker({
           multiple: false,
-          types: [{ description: "Exportación XML de Salud", accept: { "application/xml": [".xml"] } }]
+          types: [{ description: "Exportación de Salud", accept: { "application/xml": [".xml"], "application/zip": [".zip"] } }]
         });
         if (request !== intent || !selected) return;
         setHandle(selected);

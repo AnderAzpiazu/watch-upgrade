@@ -1,0 +1,66 @@
+.feature-panel { padding: 22px 23px; }
+.feature-note, #latest-measurement, .goal-status {
+  color: var(--soft);
+  font-size: .86rem;
+  line-height: 1.55;
+}
+.feature-note { margin: 9px 0 16px; }
+#latest-measurement { display: block; margin-top: 3px; }
+.feature-grid {
+  display: grid;
+  grid-template-columns: minmax(0,1.45fr) minmax(260px,1fr);
+  gap: 16px;
+  margin: 18px 0;
+}
+.sleep-row, .sleep-axis { font-variant-numeric: tabular-nums; }
+.sleep-row {
+  --sleep-tone: #b6a2e7;
+  display: grid; grid-template-columns: 52px 1fr 100px;
+  align-items: center; gap: 10px; min-height: 42px;
+  border-top: 1px solid var(--line);
+  font-size: .81rem;
+}
+.sleep-axis {
+  display: flex; justify-content: space-between; margin: 0 108px 6px 58px;
+  color: var(--soft); font-size: .72rem;
+}
+.sleep-track {
+  height: 12px; background: #292b32; position: relative; border-radius: 4px;
+  background-image: repeating-linear-gradient(to right,transparent,transparent calc(25% - 1px),#44404d calc(25% - 1px),#44404d 25%);
+}
+.sleep-track span { position: absolute; height: 100%; background: var(--sleep-tone); border-radius: inherit; }
+.sleep-info { text-align: right; }
+.sleep-info small { display: block; font-size: .72rem; color: var(--soft); }
+.goal-form { display: grid; gap: 13px; margin: 16px 0 8px; }
+.goal-form label { font-size: .86rem; font-weight: 600; }
+.goal-form select, .goal-form input {
+  display: block; margin-top: 5px; width: 100%; min-height: 40px; padding: 6px 9px; border-radius: 6px;
+  border: 1px solid #474c50; color: var(--white); background: #101214; font: inherit;
+}
+.goal-value { display: block; font-size: clamp(1.5rem,3vw,2.45rem); letter-spacing: -.04em; }
+.goal-output progress { display: block; width: 100%; height: 10px; accent-color: #b9d984; margin: 14px 0; }
+.goal-remaining { font-size: .92rem; color: #d1ddc5; }
+.drop-area {
+  display: flex; flex-direction: column; align-items: center; gap: 10px; border: 1px dashed #66635c; border-radius: 10px;
+  padding: 18px; margin: 14px 0 8px;
+}
+.dragging .drop-area { background: #34251e; border-color: var(--accent); }
+.face-panel { display: grid; grid-template-columns: minmax(160px,250px) 1fr; align-items: center; gap: 30px; margin-top: 18px; }
+.face-panel img { width: 100%; max-width: 250px; height: auto; border-radius: 50%; background: #000; }
+.face-download { width: fit-content; }
+.guide-link { font-size: .85rem; color: var(--accent); text-decoration: underline; }
+.device-info a { color: var(--accent); font-size: .85rem; text-decoration: underline; text-underline-offset: 3px; }
+@media(max-width: 840px) {
+  .feature-grid { grid-template-columns: 1fr; }
+}
+@media(max-width: 650px) {
+  .feature-panel { padding: 17px; }
+  .face-panel { grid-template-columns: 1fr; gap: 12px; }
+  .face-panel img { max-width: 175px; justify-self: center; }
+}
+@media(max-width: 520px) {
+  .rail nav { overflow-x: auto; justify-content: flex-start; }
+  .rail nav .navitem { flex: none; padding-inline: 9px; }
+  .sleep-row { grid-template-columns: 42px 1fr 84px; gap: 6px; }
+  .sleep-axis { margin-left: 46px; margin-right: 87px; }
+}

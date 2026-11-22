@@ -32,11 +32,14 @@
       days[key] = {steps, distance:steps*.000735, energy:Math.round(426+Math.sin(ago*1.6)*111),
         sleep:Math.round(438+Math.sin(ago*2.4)*47), workouts, workoutMinutes:workouts ? 36 + ago % 18 : 0,
         averageHeartRate:pulse.reduce((sum,p)=>sum+p.value,0)/pulse.length, heartRate:pulse.at(-1).value, pulse};
+      days[key].sleepStart = 674 + Math.round(22 * Math.sin(ago*1.3));
+      days[key].sleepEnd = days[key].sleepStart + days[key].sleep;
     }
-    return {days,sources:[]};
+    return {days,sources:[],workouts:window.WatchWorkouts.demo(days)};
   }
 
   const example = exampleData();
+  const renderGoal = window.WatchGoals.mount($("#objetivo"));
   let imported = null, data = example, selected = today, range = "day", historyLimit = 4;
   const iconPaths = {
     brand:"M2 13h5l3-8 4 15 3-10 2 3h3",grid:"M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
@@ -50,7 +53,7 @@
     heart:"M12 20L4 12C-2 5 7-1 12 6c5-7 14-1 8 6z",
     moon:"M18 17A8 8 0 0 1 9 4a9 9 0 1 0 11 12z",
     flame:"M13 2q1 6 5 9 4 4 1 8-5 5-11 1-5-4-2-10 1 3 4 3-1-7 3-11z",
-    close:"M5 5l14 14 M19 5L5 19"
+    target:"M12 2a10 10 0 1 0 .01 0 M12 6a6 6 0 1 0 .01 0 M12 10a2 2 0 1 0 .01 0",close:"M5 5l14 14 M19 5L5 19"
   };
   function canvasSetup(canvas, width, height) {
     const ratio = Math.min(window.devicePixelRatio || 1, 3);
@@ -191,6 +194,14 @@
       spark(card.querySelector(".metric-foot canvas"),samples,getComputedStyle(card).getPropertyValue("--metric"),key==="steps"||key==="sleep");
     }
     drawChart();displayHistory();
+    window.WatchWorkouts.render($("#entrenamientos"),data,selected);
+    window.WatchSleep.render($("#regularidad"),data,selected);
+    renderGoal(data,selected);
+    const latest=$("#latest-measurement");
+    latest.hidden=!imported;
+    if(imported)latest.textContent=Number.isFinite(imported.latestMeasurementAt)
+      ? "Última medición de Huawei · "+new Date(imported.latestMeasurementAt).toLocaleString("es-ES",{dateStyle:"medium",timeStyle:"short"})
+      : "Vuelve a importar tu exportación para ver la hora de la última medición y los detalles nuevos.";
     $("#data-controls").hidden=!imported;
     if(imported)$("#source-info").textContent="Fuente: "+imported.sources.join(", ")+" · "+Object.keys(imported.days).length+" días con datos.";
   }
@@ -228,9 +239,13 @@
     historyLimit=4;render();
   }
   async function importFile(file, automatic=false){
-    const status=$("#import-status");status.textContent="Leyendo el XML de Salud…";
+    const status=$("#import-status");status.textContent="Leyendo la exportación de Salud…";
     try{
-      const summary=await window.WatchImport.read(file);
+      const signature=new Uint8Array(await file.slice(0,2).arrayBuffer());
+      const isZip=/\.zip$/i.test(file.name||"") || (signature[0]===80 && signature[1]===75);
+      const xml=isZip ? await window.WatchZip.open(file) : file;
+      const summary=await window.WatchImport.read(xml);
+      if(!automatic)await sync.disconnect();
       let saved=true;
       try{await stored("put",summary);}catch{saved=false;}
       activate(summary,automatic && !!imported && selected!==Object.keys(imported.days).sort().at(-1));
@@ -241,7 +256,7 @@
     onFile:file=>importFile(file,true),
     onStatus:({state,name,message})=>{
       $("#sync-text").textContent=(name?name+" · ":"")+message;
-      $("#sync-choose").hidden=state==="unsupported";
+      $("#sync-choose").hidden=!sync.supported || state==="unsupported";
       $("#sync-reconnect").hidden=state!=="permission";
       $("#sync-stop").hidden=!name;
     }
@@ -249,10 +264,29 @@
   $("#sync-choose").addEventListener("click",()=>sync.choose());
   $("#sync-stop").addEventListener("click",()=>sync.disconnect());
   $("#sync-reconnect").addEventListener("click",()=>sync.reconnect());
-  $("#file").addEventListener("change",async e=>{
-    const file=e.target.files[0];e.target.value="";if(!file)return;
-    $("#pick-file").disabled=true;
-    try{await sync.disconnect();await importFile(file);}catch{}finally{$("#pick-file").disabled=false;}
+  async function acceptFile(file){
+    const buttons=[$("#pick-file"),$("#sync-choose"),$("#sync-reconnect"),$("#clear-data")];
+    if(!file || buttons[0].disabled)return;
+    buttons.forEach(b=>b.disabled=true);
+    try{await importFile(file);}catch{}finally{buttons.forEach(b=>b.disabled=false);}
+  }
+  $("#file").addEventListener("change",e=>{
+    const file=e.target.files[0];e.target.value="";acceptFile(file);
+  });
+  const hasFiles=e=>Array.from(e.dataTransfer?.types||[]).includes("Files");
+  window.addEventListener("dragover",e=>{
+    if(!hasFiles(e))return;
+    e.preventDefault();e.dataTransfer.dropEffect="copy";
+    if(!dialog.open)dialog.showModal();
+    dialog.classList.add("dragging");
+  });
+  window.addEventListener("dragleave",e=>{if(!e.relatedTarget)dialog.classList.remove("dragging");});
+  window.addEventListener("drop",e=>{
+    if(!hasFiles(e) && !e.dataTransfer?.files.length)return;
+    e.preventDefault();dialog.classList.remove("dragging");
+    if(!dialog.open)dialog.showModal();
+    if(e.dataTransfer.files.length!==1){$("#import-status").textContent="Elige una exportación cada vez.";return;}
+    acceptFile(e.dataTransfer.files[0]);
   });
   $("#clear-data").addEventListener("click",async()=>{
     if(!window.confirm("¿Borrar el resumen guardado en este navegador y desvincular el archivo?"))return;
@@ -265,6 +299,6 @@
   window.addEventListener("resize",()=>{cancelAnimationFrame(redraw);redraw=requestAnimationFrame(render);});
   (async()=>{let cached;try{cached=await stored("get");}catch{}
     if(cached?.days && Object.keys(cached.days).length)activate(cached,false);
-    await sync.restore({hasData:!!imported});
+    await sync.restore({hasData:Number.isFinite(imported?.latestMeasurementAt)});
   })();
 })();
